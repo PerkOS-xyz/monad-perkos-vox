@@ -8,10 +8,11 @@
 
 [![Live Demo](https://img.shields.io/badge/🔴_Live_Demo-vox.perkos.xyz-blueviolet?style=for-the-badge)](https://vox.perkos.xyz)
 [![Agent API](https://img.shields.io/badge/Agent_API-Online-00C853?style=for-the-badge)](https://agent-vox.perkos.xyz/health)
+[![PerkOS Stack](https://img.shields.io/badge/PerkOS_Stack-x402-blue?style=for-the-badge)](https://stack.perkos.xyz)
 [![Monad](https://img.shields.io/badge/Monad-Mainnet_(143)-7C3AED?style=for-the-badge)](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5)
 [![Contract](https://img.shields.io/badge/Contract-Verified-green?style=for-the-badge)](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5)
 
-> *"Made 6 bets during lunch. All settled on-chain in 7.5 seconds total. Won $3.20."*
+> *"Made 6 bets during lunch. All settled on-chain in 7.5 seconds total."*
 
 </div>
 
@@ -23,29 +24,90 @@ Betting between friends is broken: handshake bets are forgotten, Venmo is manual
 
 ## 💡 The Solution
 
-PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** using an AI wearable, an AI oracle, and Monad's 800ms finality.
+PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** using an AI wearable, an AI oracle, and Monad's 800ms finality — with [x402](https://www.x402.org/) micropayments facilitated by [PerkOS Stack](https://stack.perkos.xyz).
 
 ---
 
 ## 🏗️ Architecture
 
+### End-to-End Flow
+
+```mermaid
+sequenceDiagram
+    participant User as 🎙️ User (Omi Wearable)
+    participant Omi as 📡 Omi Cloud
+    participant Agent as 🤖 Vox Agent (OpenClaw)
+    participant Stack as 💳 PerkOS Stack (x402)
+    participant Monad as ⛓️ Monad L1
+
+    User->>Omi: "I bet you 10 cents BTC > 90K"
+    Omi->>Agent: POST /omimesh/transcript
+    Agent->>Agent: AI Parser extracts bet
+    Agent->>Monad: TX1: createBet (800ms)
+    Agent->>Stack: x402 verify payment
+    Stack->>Monad: TX2: matchBet (800ms)
+    Agent->>Agent: Oracle resolves condition
+    Agent->>Monad: TX3: resolveBet + payout (800ms)
+    Monad->>User: Winner receives USDC 💰
 ```
-  🎙️ Voice                    🌐 Webhook                 🤖 AI Oracle              ⛓️ On-Chain
-┌──────────────┐          ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
-│              │          │              │          │              │          │              │
-│  Omi AI      │  audio   │  OmiMesh     │ transcript│  OpenClaw    │  tx      │  Monad L1    │
-│  Wearable    │────────▶ │  Plugin      │────────▶ │  Vox Agent   │────────▶ │  800ms ⚡    │
-│              │          │              │          │              │          │              │
-│  "I bet $0.10   │          │  Cloudflare  │          │  Parse bet   │          │  VoiceBet    │
-│   BTC hits   │          │  Tunnel      │          │  Lock escrow │          │  Escrow.sol  │
-│   120K"      │          │              │          │  Resolve     │          │  USDC settle │
-│              │          │              │          │  Pay winner  │          │              │
-└──────────────┘          └──────────────┘          └──────────────┘          └──────────────┘
-                                                           │
-                                                    ┌──────┴──────┐
-                                                    │  PerkOS x402 │
-                                                    │  Payments    │
-                                                    └─────────────┘
+
+### System Architecture
+
+```mermaid
+flowchart LR
+    A[🎙️ Omi AI Wearable] -->|Audio Stream| B[📡 OmiMesh Plugin]
+    B -->|POST /omimesh/transcript| C[🤖 Vox Agent]
+    
+    subgraph Agent["Vox Agent (OpenClaw)"]
+        C --> D[Bet Parser]
+        D --> E[Oracle Engine]
+    end
+    
+    E -->|Create / Match / Resolve| F[⛓️ Monad L1]
+    
+    subgraph Payments["PerkOS Stack (x402)"]
+        G[EIP-3009 Verify] --> H[On-Chain Settle]
+    end
+    
+    C <-->|x402 Payment Flow| G
+    H --> F
+    F -->|USDC Payout| I[💰 Winner]
+```
+
+### Smart Contract State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: createBet()
+    Created --> Matched: matchBet()
+    Created --> Cancelled: cancelBet()
+    Created --> Expired: expireBet()
+    Matched --> Resolved: resolveBet()
+    Resolved --> [*]: USDC paid to winner
+```
+
+### x402 Payment Flow (PerkOS Stack)
+
+```mermaid
+sequenceDiagram
+    participant Client as 🤖 Vox Agent
+    participant Stack as 💳 PerkOS Stack
+    participant Chain as ⛓️ Monad
+
+    Note over Client,Chain: Exact Scheme (Immediate Settlement)
+    Client->>Client: Sign EIP-3009 transferWithAuthorization
+    Client->>Stack: POST /api/v2/x402/verify (signed payload)
+    Stack->>Stack: Validate signature + balance
+    Stack-->>Client: ✅ Payment verified
+    Client->>Stack: POST /api/v2/x402/settle
+    Stack->>Chain: Execute transferWithAuthorization on-chain
+    Chain-->>Stack: TX confirmed (800ms)
+    Stack-->>Client: ✅ Settlement receipt
+
+    Note over Client,Chain: Deferred Scheme (Voucher)
+    Client->>Stack: POST /api/v2/x402/verify (voucher)
+    Stack-->>Client: ✅ Voucher valid
+    Note right of Stack: Settles later in batch
 ```
 
 ---
@@ -55,12 +117,61 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 | Step | What Happens | Time |
 |------|-------------|------|
 | 1️⃣ **Detect** | Omi wearable hears *"I bet..."* or *"wanna bet?"* | Real-time |
-| 2️⃣ **Parse** | Vox AI extracts `{ condition, amount, parties, category, deadline }` | ~200ms |
-| 3️⃣ **Lock** | Both parties sign → USDC locks in escrow on Monad | **800ms** ⚡ |
-| 4️⃣ **Resolve** | Vox oracle checks condition (API, AI judgment, or mutual confirm) | Auto |
-| 5️⃣ **Payout** | Winner receives 2× bet minus 2% fee | **800ms** ⚡ |
+| 2️⃣ **Parse** | AI extracts `{ condition, amount, parties, category, deadline }` | ~200ms |
+| 3️⃣ **Lock** | `createBet()` → USDC locks in escrow on Monad | **800ms** ⚡ |
+| 4️⃣ **Match** | Party B matched via `matchBet()` — auto or manual | **800ms** ⚡ |
+| 5️⃣ **Resolve** | Oracle checks condition (API, AI judgment, or confirmation) | Auto |
+| 6️⃣ **Payout** | `resolveBet()` → winner receives 2× bet minus 2% fee | **800ms** ⚡ |
 
-**Minimum 3 on-chain txs per bet** (lock A + lock B + payout). Fast bets = lots of visible chain activity 🔥
+**3 on-chain transactions per bet** (create + match + resolve). Full lifecycle in ~5-7 seconds.
+
+---
+
+## 🔑 Key Features
+
+### 🎙️ Voice Detection
+The [Omi AI wearable](https://omi.me) captures natural speech continuously. When it detects bet-like language, transcripts are sent to the Vox Agent via the [OmiMesh](https://github.com/PerkOS-xyz/OmiMesh) plugin webhook.
+
+### 🧠 AI Bet Parser
+Extracts structured bet data from natural language:
+- **Amount:** Supports `$0.10`, `ten cents`, `a dime`, `fifty cents`, `a dollar`
+- **Condition:** `"BTC above 90K"`, `"it'll rain tomorrow"`, `"Lakers win tonight"`
+- **Category:** Auto-classified into one of 5 categories
+- **Deadline:** Parsed from `"by Friday"`, `"tomorrow"`, `"in 1 hour"`
+
+### 📋 5 Bet Categories
+
+| Category | Example | Oracle Source |
+|----------|---------|---------------|
+| 🪙 **crypto_price** | *"I bet $0.10 BTC is above 90K"* | [CoinGecko API](https://www.coingecko.com/) (auto) |
+| 🌤️ **weather** | *"I bet $0.10 it rains in Denver"* | [wttr.in](https://wttr.in/) (auto) |
+| ⚽ **sports** | *"I bet $0.10 Lakers win tonight"* | Sports API (auto) |
+| 🧠 **trivia** | *"I bet $0.10 the capital of Mongolia is..."* | AI instant resolve |
+| 🎲 **fun_social** | *"I bet $0.10 you can't do 20 pushups"* | Voice confirmation |
+
+### 💳 x402 Payments via PerkOS Stack
+[PerkOS Stack](https://stack.perkos.xyz) acts as the **x402 payment facilitator**:
+- **EIP-3009** `transferWithAuthorization` — gasless USDC transfers
+- **Exact scheme** — immediate on-chain settlement
+- **Deferred scheme** — voucher-based, batch-settled later
+- **Multi-chain** — supports Monad, Base, and more
+- **Endpoints:** `/api/v2/x402/verify` and `/api/v2/x402/settle`
+
+### 📊 Real-time Dashboard
+Live at [vox.perkos.xyz](https://vox.perkos.xyz):
+- Polls the agent API every 15 seconds
+- Live bet feed with status indicators
+- Transaction ticker with Monadscan links
+- Leaderboard and volume stats
+
+### 🔮 Auto Lifecycle
+Every bet follows the full path automatically:
+1. `createBet()` — Party A's USDC locked in escrow
+2. `matchBet()` — Party B automatically matched
+3. Oracle resolves the condition
+4. `resolveBet()` — winner receives payout
+
+All 3 transactions settle in **~5-7 seconds total** on Monad.
 
 ---
 
@@ -71,7 +182,7 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 │           🏁 BENCHMARK: 6 BETS                  │
 │                                                  │
 │   Total time:     7.5 seconds                    │
-│   Avg per bet:    1.25s (lock + resolve + pay)   │
+│   Avg per bet:    1.25s (create + match + pay)   │
 │   On-chain txs:   18+                            │
 │   Gas cost:       ~$0.03 total                   │
 │                                                  │
@@ -85,6 +196,7 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 | Finality | 800ms | ~12 min | **900×** |
 | 6 bets settled | 7.5s | ~72 min | **576×** |
 | Gas for 6 bets | ~$0.03 | ~$120 | **4,000×** |
+| Avg TX time | 800ms–1.7s | ~15s+ | **10×** |
 
 ---
 
@@ -93,11 +205,12 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 | Layer | Technology | Role |
 |-------|-----------|------|
 | **Voice Capture** | [Omi AI Wearable](https://omi.me) | Always-on voice → transcript |
-| **Plugin Bridge** | [OmiMesh](https://github.com/PerkOS-xyz/OmiMesh) | Webhook relay to OpenClaw |
-| **AI Oracle** | [OpenClaw](https://docs.openclaw.ai) | Bet parsing, resolution, tx execution |
-| **Payments** | [PerkOS Stack](https://stack.perkos.xyz) (x402) | Micropayment facilitation |
+| **Plugin Bridge** | [OmiMesh](https://github.com/PerkOS-xyz/OmiMesh) | Webhook relay to Vox Agent |
+| **AI Agent** | [OpenClaw](https://openclaw.ai) | Bet parsing, resolution, tx execution |
+| **Payments** | [PerkOS Stack](https://stack.perkos.xyz) (x402) | EIP-3009 micropayment facilitation |
 | **Settlement** | [Monad](https://monad.xyz) (Chain 143) | 10K TPS, 800ms finality, USDC escrow |
-| **Dashboard** | Next.js + Tailwind | Real-time bet feed & leaderboard |
+| **Dashboard** | [Next.js 16](https://nextjs.org/) + Tailwind | Real-time bet feed at [vox.perkos.xyz](https://vox.perkos.xyz) |
+| **Contracts** | [Foundry](https://book.getfoundry.sh/) | Smart contract dev, test, deploy |
 
 ---
 
@@ -105,30 +218,83 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 
 Deployed on **Monad Mainnet** • [View on Monadscan →](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5)
 
-```solidity
-// Core features
-- 5 bet categories: crypto_price, weather, sports, trivia, fun_social
-- Bet range: $0.01 – $1.00 (USDC, 6 decimals)
+**Features:**
+- 5 bet categories with oracle-based resolution
+- Bet range: **$0.01 – $1.00** (USDC, 6 decimals)
 - 2% platform fee (200 bps), max 5%
-- ReentrancyGuard + SafeERC20
-- Oracle-resolved or auto-expire with refund
-- On-chain stats: totalBets, totalVolume, totalResolved
-```
+- `ReentrancyGuard` + `SafeERC20`
+- Auto-expire with full refund
+- On-chain stats: `totalBets`, `totalVolume`, `totalResolved`
 
 | Contract | Address | Network |
 |----------|---------|---------|
 | **VoiceBetEscrow** | [`0x0b3b319145543da36E5e9Bf07BF66e67B28260A5`](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5) | Monad (143) |
 | **USDC** (Circle CCTP) | [`0x754704Bc059F8C67012fEd69BC8A327a5aafb603`](https://monadscan.com/address/0x754704Bc059F8C67012fEd69BC8A327a5aafb603) | Monad (143) |
 
-### 📋 Bet Categories
+---
 
-| Category | Example | Resolution |
-|----------|---------|------------|
-| 🪙 Crypto Price | *"BTC above 100K by Friday"* | Price API (auto) |
-| 🌤️ Weather | *"It'll rain in Denver tomorrow"* | Weather API (auto) |
-| ⚽ Sports | *"Lakers win tonight"* | Sports API (auto) |
-| 🧠 Trivia | *"Capital of Mongolia?"* | AI instant resolve |
-| 🎲 Fun/Social | *"You can't do 20 pushups"* | Voice confirmation |
+## 📡 API Reference
+
+Base URL: `https://agent-vox.perkos.xyz`
+
+### Health & Status
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Service health check |
+| `GET` | `/bets` | List all detected/processed bets |
+| `GET` | `/api/stats` | Volume, count, and speed statistics |
+
+### Bet Lifecycle
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/bet` | Create a new bet from structured data |
+| `POST` | `/api/match/:id` | Match an existing bet (Party B) |
+| `POST` | `/api/resolve/:id` | Resolve a bet with oracle result |
+
+### OmiMesh Integration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/omimesh/transcript` | Receive voice transcript from Omi wearable |
+| `POST` | `/omimesh/memory` | Store conversation context |
+| `GET` | `/omimesh/status` | OmiMesh connection status |
+
+### Webhook
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/webhook/transcript` | Generic transcript webhook (OmiMesh relay) |
+
+### Example Request
+
+```bash
+# Create a bet via transcript
+curl -X POST https://agent-vox.perkos.xyz/omimesh/transcript \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "I bet you ten cents that Bitcoin is above 90K right now",
+    "speaker": "user_1",
+    "timestamp": 1739836200
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "bet_detected": true,
+  "bet": {
+    "amount": 0.10,
+    "condition": "BTC above 90K",
+    "category": "crypto_price",
+    "deadline": "immediate",
+    "tx_hash": "0x..."
+  },
+  "status": "created"
+}
+```
 
 ---
 
@@ -141,7 +307,7 @@ Monad-Denver-2026/
 │   ├── test/VoiceBetEscrow.t.sol   # Full test suite
 │   ├── script/Deploy.s.sol         # Deployment script
 │   └── foundry.toml
-├── agent/                          # Vox — OpenClaw AI agent
+├── agent/                          # Vox — AI agent
 │   ├── SOUL.md                     # Agent persona & rules
 │   ├── bet-parser.ts               # Intent detection + structuring
 │   ├── oracle.ts                   # Resolution logic (APIs + AI)
@@ -170,8 +336,8 @@ Monad-Denver-2026/
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/PerkOS-xyz/Monad-Denver-2026.git
-cd Monad-Denver-2026
+git clone https://github.com/PerkOS-xyz/monad-perkos-vox.git
+cd monad-perkos-vox
 ```
 
 ### 2. Smart Contracts
@@ -192,11 +358,11 @@ cp .env.example .env.local    # Add your RPC & contract addresses
 pnpm dev                      # http://localhost:3000
 ```
 
-### 4. Agent (OpenClaw)
+### 4. Agent
 
 ```bash
 cd agent
-# Configure SOUL.md with your OpenClaw gateway
+# Configure SOUL.md with your gateway settings
 # Start via OpenClaw CLI
 openclaw gateway start
 ```
@@ -208,45 +374,6 @@ NEXT_PUBLIC_MONAD_RPC=https://rpc.monad.xyz
 NEXT_PUBLIC_ESCROW_ADDRESS=0x0b3b319145543da36E5e9Bf07BF66e67B28260A5
 NEXT_PUBLIC_USDC_ADDRESS=0x754704Bc059F8C67012fEd69BC8A327a5aafb603
 NEXT_PUBLIC_CHAIN_ID=143
-```
-
----
-
-## 🌍 Live Deployment
-
-> **Everything is live and running.** Voice a bet → watch it land on-chain.
-
-| Service | URL | Stack |
-|---------|-----|-------|
-| 🔴 **Live Demo** | [vox.perkos.xyz](https://vox.perkos.xyz) | Next.js static export → Netlify (auto-deploy) |
-| 🤖 **Agent API** | [agent-vox.perkos.xyz](https://agent-vox.perkos.xyz/health) | Node.js + Express on AWS |
-| ⛓️ **Contract** | [Monadscan](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5) | Monad Mainnet (143) |
-
-### Agent API Endpoints
-
-```
-POST /webhook/transcript   ← OmiMesh sends voice transcripts here
-GET  /health               ← Service health check
-GET  /bets                 ← List all detected/processed bets
-```
-
-### Infrastructure
-
-| Component | Details |
-|-----------|---------|
-| **AWS VPS** | `t3.medium` · Ubuntu 24.04 · nginx reverse proxy · systemd service |
-| **Netlify** | Static export auto-deployed from `webapp/out` on push |
-| **Agent Service** | Accepts OmiMesh webhook payloads, auto-detects bets from voice transcripts |
-
-### 🧪 Tested End-to-End
-
-```
-🎙️ "I bet you $0.10 that Bitcoin hits 120K by Friday"
-       ↓
-🤖 Parsed → { amount: 0.10, condition: "BTC hits 120K", 
-               category: "crypto_price", deadline: "Friday" }
-       ↓
-⛓️ Escrow locked on Monad in 800ms ⚡
 ```
 
 ---
@@ -265,13 +392,40 @@ GET  /bets                 ← List all detected/processed bets
 
 ---
 
+## 🌍 Live Deployment
+
+| Service | URL | Status |
+|---------|-----|--------|
+| 🔴 **Dashboard** | [vox.perkos.xyz](https://vox.perkos.xyz) | Live |
+| 🤖 **Agent API** | [agent-vox.perkos.xyz](https://agent-vox.perkos.xyz/health) | Live |
+| 💳 **PerkOS Stack** | [stack.perkos.xyz](https://stack.perkos.xyz) | Live |
+| ⛓️ **Contract** | [Monadscan](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5) | Verified |
+| 📦 **GitHub** | [github.com/PerkOS-xyz/monad-perkos-vox](https://github.com/PerkOS-xyz/monad-perkos-vox) | Public |
+
+### 🧪 Tested End-to-End
+
+```
+🎙️ "I bet you ten cents that Bitcoin is above 90K"
+       ↓
+🤖 Parsed → { amount: 0.10, condition: "BTC above 90K", 
+               category: "crypto_price", deadline: "immediate" }
+       ↓
+⛓️ TX1: createBet — 800ms
+⛓️ TX2: matchBet  — 800ms  
+⛓️ TX3: resolveBet + payout — 800ms
+       ↓
+💰 Winner receives $0.196 USDC (2% fee)
+```
+
+---
+
 ## 👥 Team
 
 | | Name | Role |
 |---|------|------|
 | 🧑‍💻 | **Julio M Cruz** | Founder, PerkOS · Smart contracts · Architecture · Agent development |
 
-**PerkOS** — Building the micropayment layer for AI agents and voice interfaces.
+**[PerkOS](https://perkos.xyz)** — Building the micropayment layer for AI agents and voice interfaces.
 
 ---
 
@@ -281,12 +435,18 @@ GET  /bets                 ← List all detected/processed bets
 |---|------|
 | 🌐 **Live Demo** | [vox.perkos.xyz](https://vox.perkos.xyz) |
 | 🤖 **Agent API** | [agent-vox.perkos.xyz](https://agent-vox.perkos.xyz/health) |
-| 📦 **GitHub** | [github.com/PerkOS-xyz/Monad-Denver-2026](https://github.com/PerkOS-xyz/Monad-Denver-2026) |
+| 💳 **PerkOS Stack** | [stack.perkos.xyz](https://stack.perkos.xyz) |
+| 📦 **GitHub** | [github.com/PerkOS-xyz/monad-perkos-vox](https://github.com/PerkOS-xyz/monad-perkos-vox) |
 | 📜 **Contract** | [Monadscan](https://monadscan.com/address/0x0b3b319145543da36E5e9Bf07BF66e67B28260A5) |
-| 🛠️ **PerkOS Stack** | [stack.perkos.xyz](https://stack.perkos.xyz) |
 | 🕸️ **OmiMesh** | [github.com/PerkOS-xyz/OmiMesh](https://github.com/PerkOS-xyz/OmiMesh) |
-| 🤖 **OpenClaw** | [docs.openclaw.ai](https://docs.openclaw.ai) |
+| 🤖 **OpenClaw** | [openclaw.ai](https://openclaw.ai) |
 | 🎧 **Omi Wearable** | [omi.me](https://omi.me) |
+
+---
+
+## 📄 License
+
+MIT
 
 ---
 

@@ -22,6 +22,7 @@ const BET_TRIGGERS = [
   /\bput\s+\$?(\d+\.?\d*)\s+on\b/i,
   /\bi('|')ll\s+bet\s+\$?(\d+\.?\d*)/i,
   /\bi('|')ll\s+bet\s+(a\s+dollar|a\s+buck|half\s+a\s+dollar|fifty\s+cents)/i,
+  /\bi\s*bet\s+you\s+(ten|twenty|thirty|fifty|five|fifteen|twenty\s*five)\s+cents/i,
   /\bno\s+way\s+that\b/i,
   /\byou('|')re\s+wrong\b/i,
 ];
@@ -81,9 +82,12 @@ export function parseBetFromTranscript(text: string): ParsedBet | null {
   // Handle word amounts — "half a dollar" → $0.50, "a dollar" → $1, "five bucks" → $5
   const wordAmounts: Record<string, number> = {
     "half a dollar": 0.50, "fifty cents": 0.50, "quarter": 0.25,
+    "ten cents": 0.10, "twenty cents": 0.20, "twenty five cents": 0.25,
+    "five cents": 0.05, "fifteen cents": 0.15, "thirty cents": 0.30,
+    "a dime": 0.10, "a nickel": 0.05,
     "a dollar": 1, "one dollar": 1, "a buck": 1, "one buck": 1,
     "two dollars": 2, "two bucks": 2, "five dollars": 5, "five bucks": 5,
-    "ten dollars": 10, "ten bucks": 10, "twenty five cents": 0.25,
+    "ten dollars": 10, "ten bucks": 10,
   };
   const lower = text.toLowerCase();
   for (const [phrase, val] of Object.entries(wordAmounts)) {
