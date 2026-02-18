@@ -16,10 +16,12 @@ export interface ParsedBet {
 const BET_TRIGGERS = [
   /\bi\s*bet\s*(you\s*)?\$?(\d+\.?\d*)/i,
   /\bbet\s*(you\s*)?\$?(\d+\.?\d*)/i,
+  /\bi\s*bet\s+you\s+(a\s+dollar|a\s+buck|half\s+a\s+dollar|fifty\s+cents|\d+\s*cents|\d+\s*bucks?)/i,
   /\bwanna\s+bet\b/i,
   /\$(\d+\.?\d*)\s*(says|that|on)\b/i,
   /\bput\s+\$?(\d+\.?\d*)\s+on\b/i,
   /\bi('|')ll\s+bet\s+\$?(\d+\.?\d*)/i,
+  /\bi('|')ll\s+bet\s+(a\s+dollar|a\s+buck|half\s+a\s+dollar|fifty\s+cents)/i,
   /\bno\s+way\s+that\b/i,
   /\byou('|')re\s+wrong\b/i,
 ];
@@ -69,6 +71,24 @@ export function parseBetFromTranscript(text: string): ParsedBet | null {
   }
 
   if (confidence < 0.3) return null;
+
+  // Handle "cents" — e.g. "50 cents" → $0.50
+  const centsMatch = text.match(/(\d+)\s*cents/i);
+  if (centsMatch) {
+    amount = parseInt(centsMatch[1]) / 100;
+  }
+
+  // Handle word amounts — "half a dollar" → $0.50, "a dollar" → $1, "five bucks" → $5
+  const wordAmounts: Record<string, number> = {
+    "half a dollar": 0.50, "fifty cents": 0.50, "quarter": 0.25,
+    "a dollar": 1, "one dollar": 1, "a buck": 1, "one buck": 1,
+    "two dollars": 2, "two bucks": 2, "five dollars": 5, "five bucks": 5,
+    "ten dollars": 10, "ten bucks": 10, "twenty five cents": 0.25,
+  };
+  const lower = text.toLowerCase();
+  for (const [phrase, val] of Object.entries(wordAmounts)) {
+    if (lower.includes(phrase)) { amount = val; confidence += 0.3; break; }
+  }
 
   // Default amount if none detected
   if (amount === 0) amount = 0.10;
