@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TxTicker from "@/components/TxTicker";
 import BetBoard from "@/components/BetBoard";
 import Leaderboard from "@/components/Leaderboard";
@@ -8,6 +8,7 @@ import Stats from "@/components/Stats";
 import HowItWorks from "@/components/HowItWorks";
 import SpeedChart from "@/components/SpeedChart";
 import { CONTRACTS, explorerAddress } from "@/lib/monad";
+import { fetchHealth, fetchBets } from "@/lib/api";
 import type { Transaction, Bet, LeaderboardEntry, Stats as StatsType } from "@/lib/types";
 
 // Demo data — will be replaced with real-time data from Monad
@@ -89,9 +90,52 @@ const DEMO_STATS: StatsType = {
 
 export default function Home() {
   const [transactions] = useState<Transaction[]>(DEMO_TXS);
-  const [bets] = useState<Bet[]>(DEMO_BETS);
+  const [bets, setBets] = useState<Bet[]>(DEMO_BETS);
   const [leaderboard] = useState<LeaderboardEntry[]>(DEMO_LEADERBOARD);
-  const [stats] = useState<StatsType>(DEMO_STATS);
+  const [stats, setStats] = useState<StatsType>(DEMO_STATS);
+
+  // Fetch live data from agent API (client-side, graceful fallback)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLiveData() {
+      try {
+        const health = await fetchHealth();
+        if (!cancelled) {
+          setStats((prev) => ({
+            ...prev,
+            totalBets: health.betsDetected > 0 ? health.betsDetected : prev.totalBets,
+          }));
+        }
+      } catch {
+        // API down — keep demo stats
+      }
+
+      try {
+        const data = await fetchBets();
+        if (!cancelled && data.bets.length > 0) {
+          const liveBets: Bet[] = data.bets.map((b, i) => ({
+            id: b.id || `live-${i}`,
+            partyA: b.bettor || "0x0000000000000000000000000000000000000000",
+            partyB: "0x0000000000000000000000000000000000000000",
+            amount: b.amount ?? 0,
+            condition: b.condition || "Voice bet detected",
+            category: (b.category as Bet["category"]) || "fun_social",
+            deadline: Date.now() + 86400000,
+            status: (b.status as Bet["status"]) || "pending",
+            createdAt: b.timestamp || Date.now(),
+          }));
+          setBets(liveBets);
+        }
+      } catch {
+        // API down — keep demo bets
+      }
+    }
+
+    loadLiveData();
+    const interval = setInterval(loadLiveData, 15000); // refresh every 15s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto">
