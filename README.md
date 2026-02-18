@@ -4,7 +4,7 @@
 
 ### *"Just say it. Bet it. Settle it. 800ms."*
 
-**Voice-powered micro-betting on Monad.** Two people talk → AI detects *"I bet you $0.25 that..."* → funds lock on-chain in 800ms → AI resolves → winner gets paid. No app. No clicks. Just conversation.
+**Voice-powered micro-betting on Monad.** Two people talk → AI detects *"I bet you $0.10 that..."* → funds lock on-chain in 800ms → AI resolves → winner gets paid. No app. No clicks. Just conversation.
 
 [![Live Demo](https://img.shields.io/badge/🔴_Live_Demo-vox.perkos.xyz-blueviolet?style=for-the-badge)](https://vox.perkos.xyz)
 [![Agent API](https://img.shields.io/badge/Agent_API-Online-00C853?style=for-the-badge)](https://agent-vox.perkos.xyz/health)
@@ -36,7 +36,7 @@ PerkOS Vox turns casual conversation into **trustless, on-chain micro-bets** usi
 │  Omi AI      │  audio   │  OmiMesh     │ transcript│  OpenClaw    │  tx      │  Monad L1    │
 │  Wearable    │────────▶ │  Plugin      │────────▶ │  Vox Agent   │────────▶ │  800ms ⚡    │
 │              │          │              │          │              │          │              │
-│  "I bet $1   │          │  Cloudflare  │          │  Parse bet   │          │  VoiceBet    │
+│  "I bet $0.10   │          │  Cloudflare  │          │  Parse bet   │          │  VoiceBet    │
 │   BTC hits   │          │  Tunnel      │          │  Lock escrow │          │  Escrow.sol  │
 │   120K"      │          │              │          │  Resolve     │          │  USDC settle │
 │              │          │              │          │  Pay winner  │          │              │
@@ -108,7 +108,7 @@ Deployed on **Monad Mainnet** • [View on Monadscan →](https://monadscan.com/
 ```solidity
 // Core features
 - 5 bet categories: crypto_price, weather, sports, trivia, fun_social
-- Bet range: $0.01 – $10.00 (USDC, 6 decimals)
+- Bet range: $0.01 – $1.00 (USDC, 6 decimals)
 - 2% platform fee (200 bps), max 5%
 - ReentrancyGuard + SafeERC20
 - Oracle-resolved or auto-expire with refund
@@ -241,9 +241,9 @@ GET  /bets                 ← List all detected/processed bets
 ### 🧪 Tested End-to-End
 
 ```
-🎙️ "I bet you $0.50 that Bitcoin hits 120K by Friday"
+🎙️ "I bet you $0.10 that Bitcoin hits 120K by Friday"
        ↓
-🤖 Parsed → { amount: 0.50, condition: "BTC hits 120K", 
+🤖 Parsed → { amount: 0.10, condition: "BTC hits 120K", 
                category: "crypto_price", deadline: "Friday" }
        ↓
 ⛓️ Escrow locked on Monad in 800ms ⚡
